@@ -90,3 +90,12 @@ class PDFImporter:
         page.insert_textbox(rect, text_content, fontsize=12)
         doc.save(output_pdf_path)
         doc.close()
+
+
+def extract_umts_from_pdf(pdf_path: str) -> List[Any]:
+    """Extrai UMTs diretamente de um arquivo PDF."""
+    importer = PDFImporter()
+    md_text = importer.convert_pdf_to_markdown(pdf_path)
+    from .umt_extractor import UMTExtractor
+    return UMTExtractor().extract_from_text(md_text)
+

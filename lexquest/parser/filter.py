@@ -49,3 +49,7 @@ class EditorialFilter:
             clean_lines.append(line)
 
         return "\n".join(clean_lines).strip()
+
+
+# Alias para retrocompatibilidade
+LexicalFilter = EditorialFilter

@@ -16,12 +16,12 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 from lexquest.models import Banca, QuestionFormat, Complexity, Question, UMT
-from lexquest.parser.filter import LexicalFilter
+from lexquest.parser.filter import EditorialFilter, LexicalFilter
 from lexquest.parser.umt_extractor import UMTExtractor
 from lexquest.parser.pdf_importer import extract_umts_from_pdf
-from lexquest.engine.block_manager import BlockManager, CebraspeBattery
+from lexquest.engine.block_manager import BlockManager
 from lexquest.graph.legal_graph import LegalKnowledgeGraph
-from lexquest.renderer.markdown_renderer import render_caderno_markdown
+from lexquest.renderer import ExamRenderer
 
 # Configuração da Página
 st.set_page_config(
@@ -74,20 +74,6 @@ CUSTOM_CSS = """
         margin-bottom: 8px;
     }
 
-    /* Cartão de Questão */
-    .question-card {
-        background-color: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 10px;
-        padding: 20px 24px;
-        margin-bottom: 22px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-        transition: border-color 0.2s;
-    }
-    .question-card:hover {
-        border-color: #cbd5e1;
-    }
-
     /* Badges */
     .badge {
         display: inline-block;
@@ -101,8 +87,8 @@ CUSTOM_CSS = """
     .badge-dificil { background-color: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
     .badge-medio { background-color: #fef3c7; color: #b45309; border: 1px solid #fcd34d; }
     .badge-facil { background-color: #dcfce7; color: #15803d; border: 1px solid #86efac; }
-    .badge-ramo { background-color: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
-    .badge-orgao { background-color: #f3e8ff; color: #7e22ce; border: 1px solid #d8b4fe; }
+    .badge-topic { background-color: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+    .badge-format { background-color: #f3e8ff; color: #7e22ce; border: 1px solid #d8b4fe; }
 
     /* Enunciado */
     .enunciado-text {
@@ -278,17 +264,19 @@ with st.sidebar:
             st.error("Nenhum material carregado. Escolha uma opção válida acima.")
         else:
             with st.spinner("Construindo grafo e mutações deônticas..."):
+                manager = BlockManager()
                 if banca_enum == Banca.FGV:
-                    manager = BlockManager(loaded_umts)
-                    # Gera em múltiplos de 5
                     num_blocos = max(1, qtd_questoes // 5)
                     generated_q = []
-                    for _ in range(num_blocos):
-                        generated_q.extend(manager.generate_block().questions)
+                    last_letter = None
+                    for b_idx in range(1, num_blocos + 1):
+                        block_qs = manager.generate_fgv_block(loaded_umts, block_index=b_idx, prev_last_letter=last_letter)
+                        generated_q.extend(block_qs)
+                        if block_qs:
+                            last_letter = block_qs[-1].correct_letter
                     st.session_state.questions = generated_q
                 else:
-                    battery = CebraspeBattery(loaded_umts)
-                    st.session_state.questions = battery.generate_battery(qtd_questoes)
+                    st.session_state.questions = manager.generate_cebraspe_battery(loaded_umts, total_items=qtd_questoes)
 
                 st.session_state.user_answers = {}
                 st.session_state.submitted = False
@@ -345,11 +333,10 @@ with tab_simulado:
 
         with col_top2:
             if st.session_state.submitted:
-                # Placar
                 total = len(q_list)
                 acertos = sum(
                     1 for i, q in enumerate(q_list)
-                    if st.session_state.user_answers.get(i) == q.correct_alternative_key
+                    if st.session_state.user_answers.get(i) == q.correct_letter
                 )
                 pct = (acertos / total) * 100 if total > 0 else 0
                 st.markdown(
@@ -367,29 +354,34 @@ with tab_simulado:
 
         # Renderização de Cada Questão
         for i, q in enumerate(q_list):
-            diff_class = f"badge-{q.complexity.value.lower()}"
-            diff_label = q.complexity.value
+            diff_class = f"badge-{q.difficulty.value.lower()}"
+            diff_label = q.difficulty.value
 
-            # Cabeçalho da Questão em HTML
+            # Cabeçalho da Questão
             badge_html = f"""
             <div style="margin-bottom: 10px;">
                 <span class="badge {diff_class}">{diff_label}</span>
-                <span class="badge badge-ramo">{q.ramo}</span>
-                <span class="badge badge-orgao">{q.orgao or 'LEGISLAÇÃO'}</span>
-                <span style="font-size: 11px; color: #64748b; font-weight: 600;">ID: {q.id}</span>
+                <span class="badge badge-topic">{q.topic}</span>
+                <span class="badge badge-format">{q.format.value}</span>
+                <span style="font-size: 11px; color: #64748b; font-weight: 600;">Questão #{q.id} (Bloco {q.block_index})</span>
             </div>
             """
             st.markdown(badge_html, unsafe_allow_html=True)
 
-            # Card Enunciado
-            st.markdown(f"**QUESTÃO {i + 1}**")
-            st.markdown(f'<div class="enunciado-text">{q.enunciado}</div>', unsafe_allow_html=True)
+            # Enunciado
+            st.markdown(f'<div class="enunciado-text">{q.stem}</div>', unsafe_allow_html=True)
+
+            # Proposições Romanas (se houver)
+            if q.propositions:
+                for prop in q.propositions:
+                    st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;**{prop}**")
+                st.write("")
 
             # Opções de Resposta
             if is_fgv:
-                options_dict = {alt.key: f"({alt.key}) {alt.text}" for alt in q.alternatives}
+                options_dict = {alt.letter: f"({alt.letter}) {alt.text}" for alt in q.alternatives}
                 current_choice = st.session_state.user_answers.get(i, None)
-                
+
                 selected_key = st.radio(
                     f"Sua resposta para a Questão {i + 1}:",
                     options=list(options_dict.keys()),
@@ -421,15 +413,16 @@ with tab_simulado:
             # Se já foi submetido, exibe feedback detalhado
             if st.session_state.submitted:
                 user_ans = st.session_state.user_answers.get(i)
-                is_correct = (user_ans == q.correct_alternative_key)
+                is_correct = (user_ans == q.correct_letter)
+                fontes_str = ", ".join(u.source_ref for u in q.source_umts) if q.source_umts else "Jurisprudência / Lei Seca"
 
                 if is_correct:
                     st.markdown(
                         f"""
                         <div class="feedback-box-correct">
-                            <div class="feedback-title" style="color: #15803d;">✔ RESPOSTA CORRETA! (Gabarito: {q.correct_alternative_key})</div>
-                            <p class="feedback-desc"><strong>Fundamento Jurídico:</strong> {q.comentario_gabarito}</p>
-                            <p class="feedback-desc" style="margin-top: 4px; font-size: 11.5px; color: #475569;"><em>Fonte Normativa:</em> {q.fonte}</p>
+                            <div class="feedback-title" style="color: #15803d;">✔ RESPOSTA CORRETA! (Gabarito Oficial: {q.correct_letter})</div>
+                            <p class="feedback-desc"><strong>Fundamento Jurídico:</strong> {q.commentary}</p>
+                            <p class="feedback-desc" style="margin-top: 4px; font-size: 11.5px; color: #475569;"><em>Fonte Normativa:</em> {fontes_str}</p>
                         </div>
                         """,
                         unsafe_allow_html=True,
@@ -439,9 +432,9 @@ with tab_simulado:
                     st.markdown(
                         f"""
                         <div class="feedback-box-wrong">
-                            <div class="feedback-title" style="color: #b91c1c;">✖ RESPOSTA INCORRETA (Você marcou: {user_str} • Gabarito Oficial: {q.correct_alternative_key})</div>
-                            <p class="feedback-desc"><strong>Fundamento Jurídico:</strong> {q.comentario_gabarito}</p>
-                            <p class="feedback-desc" style="margin-top: 4px; font-size: 11.5px; color: #475569;"><em>Fonte Normativa:</em> {q.fonte}</p>
+                            <div class="feedback-title" style="color: #b91c1c;">✖ RESPOSTA INCORRETA (Você marcou: {user_str} • Gabarito Oficial: {q.correct_letter})</div>
+                            <p class="feedback-desc"><strong>Fundamento Jurídico:</strong> {q.commentary}</p>
+                            <p class="feedback-desc" style="margin-top: 4px; font-size: 11.5px; color: #475569;"><em>Fonte Normativa:</em> {fontes_str}</p>
                         </div>
                         """,
                         unsafe_allow_html=True,
@@ -475,8 +468,10 @@ with tab_exportar:
         st.markdown("### 📝 Caderno do Simulado Atual")
         if st.session_state.questions:
             q_list = st.session_state.questions
-            banca_obj = Banca.FGV if st.session_state.current_banca == "fgv" else Banca.CEBRASPE
-            md_content = render_caderno_markdown(q_list, banca_obj, st.session_state.current_material_title)
+            md_content = ExamRenderer.render_batch_markdown(
+                q_list,
+                title=f"Simulado {st.session_state.current_banca.upper()} - {st.session_state.current_material_title}"
+            )
 
             st.download_button(
                 label="📄 Baixar Simulado em Markdown (.md)",
@@ -529,13 +524,13 @@ with tab_pdf:
         if extracted:
             st.success(f"Foram identificadas **{len(extracted)} Unidades Normativas (UMTs)** no documento!")
             for idx, u in enumerate(extracted, start=1):
-                with st.expander(f"UMT {idx}: {u.titulo} ({u.ramo} • {u.complexidade.value})"):
-                    st.markdown(f"**Fonte:** `{u.fonte}` | **Tema:** `{u.tema}`")
-                    st.write(u.texto)
+                with st.expander(f"UMT {idx}: {u.title} ({u.topic} • {u.complexity.value})"):
+                    st.markdown(f"**Fonte:** `{u.source_ref}` | **Tema:** `{u.topic}`")
+                    st.write(u.content)
 
             # Botão para salvar como markdown de estudo
             all_md = "\n\n---\n\n".join([
-                f"<!-- RAMO: {u.ramo} -->\n<!-- TEMA: {u.tema} -->\n<!-- FONTE: {u.fonte} -->\n### {u.titulo}\n{u.texto}"
+                f"<!-- RAMO: {u.topic} -->\n<!-- TEMA: {u.topic} -->\n<!-- FONTE: {u.source_ref} -->\n### {u.title}\n{u.content}"
                 for u in extracted
             ])
             st.download_button(

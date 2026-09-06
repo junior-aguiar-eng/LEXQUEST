@@ -1,6 +1,8 @@
 import os
 import re
 from typing import Optional, Dict, Any, List
+from .filter import EditorialFilter, DIREITO_BRANCH_HEADINGS, _DIREITO_BRANCHES_NORMALIZED, _strip_accents
+
 try:
     import pymupdf as fitz
 except ImportError:
@@ -13,8 +15,9 @@ except ImportError:
 class PDFImporter:
     """
     Importador e Minerador de Documentos Jurídicos em PDF (via PyMuPDF / fitz).
-    Converte acórdãos, informativos do STF/STJ, apostilas e códigos em PDF
-    diretamente no formato estruturado de Markdown compatível com o LexQuest.
+    Inspirado na arquitetura do Conversor NexoJuris (junior-aguiar-eng/Conversor-de-PDF-Para-MD-e-Editor).
+    Possui filtro ativo contra dados sensíveis (LGPD), marcas d'água de comprador,
+    artefatos de sumários com pontilhados e cabeçalhos de páginas.
     """
 
     def __init__(self):
@@ -26,7 +29,7 @@ class PDFImporter:
         output_md_path: Optional[str] = None
     ) -> str:
         """
-        Extrai o texto do PDF preservando blocos estruturados e gera um documento Markdown.
+        Extrai o texto do PDF estruturando títulos, artigos e eliminando ruídos.
         """
         if not self.available:
             raise RuntimeError("Biblioteca PyMuPDF não está instalada no ambiente.")
@@ -40,31 +43,77 @@ class PDFImporter:
 
         for page_num in range(len(doc)):
             page = doc[page_num]
-            page_text = page.get_text("text")
-            
-            for raw_line in page_text.splitlines():
-                line = raw_line.strip()
-                if not line:
+            page_height = page.rect.height
+
+            # Extrai blocos de texto com coordenadas
+            # (x0, y0, x1, y1, text, block_no, block_type)
+            blocks = page.get_text("blocks")
+
+            for block in blocks:
+                if len(block) < 5 or block[6] != 0:  # Apenas blocos de texto
                     continue
 
-                # Normalização e detecção de cabeçalhos jurídicos
-                if re.match(r"^(DIREITO\s+[A-ZÇÃÕ]+|INFORMATIVO|SÚMULA\s+\d+|TEMA\s+\d+|ADPF\s+\d+|ADI\s+\d+|RE\s+\d+)", line, re.IGNORECASE):
-                    md_lines.append(f"\n# **{line}**\n")
-                elif re.match(r"^Art\.\s*\d+", line, re.IGNORECASE):
-                    # Destaca artigos de lei seca
-                    md_lines.append(f"\n**{line}**\n")
-                elif re.match(r"^(COMENTÁRIOS|TESE|EMENTA|RELATÓRIO|VOTO):?$", line, re.IGNORECASE):
-                    md_lines.append(f"\n## **{line}**\n")
-                else:
-                    md_lines.append(f"{line}\n")
+                x0, y0, x1, y1, text = block[0], block[1], block[2], block[3], block[4]
+
+                # 1. Ignora cabeçalhos e rodapés extremos se forem pequenos números de página ou ruído
+                is_header_or_footer = (y0 < page_height * 0.04) or (y1 > page_height * 0.96)
+
+                raw_block_lines = text.splitlines()
+                clean_block_lines = []
+
+                for raw_line in raw_block_lines:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+
+                    # Se for rodapé/cabeçalho com apenas número de página ou dado pessoal, descarta
+                    if is_header_or_footer:
+                        if re.match(r"^\d{1,4}$", line) or EditorialFilter.is_toc_line(line):
+                            continue
+                        if any(p.search(line) for p in EditorialFilter.PII_PATTERNS):
+                            continue
+
+                    # 2. Expurgo de Linhas de Sumário com Pontilhados (ex: "... 134", "EXECUÇÃO PENAL ... 153")
+                    if EditorialFilter.is_toc_line(line):
+                        continue
+
+                    # 3. Expurgo de Dados Pessoais (CPF, Telefone, Email, Licenciado para...)
+                    cleaned_line = EditorialFilter.clean_pii(line).strip()
+                    if not cleaned_line:
+                        continue
+
+                    # 4. Detecção e Normalização de Ramos do Direito (ex: DIREITO EMPRESARIAL, EXECUÇÃO PENAL)
+                    norm_line = _strip_accents(cleaned_line.replace("**", "").replace("#", "")).upper().strip()
+                    if norm_line in _DIREITO_BRANCHES_NORMALIZED:
+                        clean_block_lines.append(f"\n# {norm_line}\n")
+                        continue
+
+                    # 5. Detecção de cabeçalhos de julgados, artigos e seções
+                    if re.match(r"^(INFORMATIVO|SÚMULA\s+\d+|TEMA\s+\d+|ADPF\s+\d+|ADI\s+\d+|RE\s+\d+)", cleaned_line, re.IGNORECASE):
+                        clean_block_lines.append(f"\n# **{cleaned_line}**\n")
+                    elif re.match(r"^Art\.\s*\d+", cleaned_line, re.IGNORECASE):
+                        clean_block_lines.append(f"\n**{cleaned_line}**\n")
+                    elif re.match(r"^(COMENTÁRIOS|TESE|EMENTA|RELATÓRIO|VOTO):?$", cleaned_line, re.IGNORECASE):
+                        clean_block_lines.append(f"\n## **{cleaned_line}**\n")
+                    else:
+                        clean_block_lines.append(cleaned_line)
+
+                if clean_block_lines:
+                    # Une linhas do bloco reconstruindo parágrafos coerentes (desfaz quebra por hifenização)
+                    block_text = "\n".join(clean_block_lines)
+                    # Desfaz hifenização no final de linha (ex: "constitu- \n cional" -> "constitucional")
+                    block_text = re.sub(r"(\w+)-\s*\n\s*(\w+)", r"\1\2", block_text)
+                    md_lines.append(f"{block_text}\n")
 
         full_md = "\n".join(md_lines)
+        # Aplica o filtro editorial completo para garantir conformidade
+        sanitized_md = EditorialFilter.clean(full_md)
 
         if output_md_path:
             with open(output_md_path, "w", encoding="utf-8") as f:
-                f.write(full_md)
+                f.write(sanitized_md)
 
-        return full_md
+        return sanitized_md
 
     def create_sample_pdf(self, output_pdf_path: str):
         """Cria um PDF de amostra para testes automatizados da extração."""
@@ -85,7 +134,6 @@ class PDFImporter:
             "Art. 312 O funcionário público que apropriar-se de dinheiro ou valor de que tem a posse em razão do cargo..."
         )
 
-        # Insere texto na página
         rect = fitz.Rect(50, 50, 550, 750)
         page.insert_textbox(rect, text_content, fontsize=12)
         doc.save(output_pdf_path)
@@ -93,9 +141,8 @@ class PDFImporter:
 
 
 def extract_umts_from_pdf(pdf_path: str) -> List[Any]:
-    """Extrai UMTs diretamente de um arquivo PDF."""
+    """Extrai UMTs diretamente de um arquivo PDF sanitizado."""
     importer = PDFImporter()
     md_text = importer.convert_pdf_to_markdown(pdf_path)
     from .umt_extractor import UMTExtractor
     return UMTExtractor().extract_from_text(md_text)
-

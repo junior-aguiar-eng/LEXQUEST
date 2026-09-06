@@ -68,10 +68,9 @@ class UMTExtractor:
             if stripped.startswith("# ") and not stripped.startswith("## "):
                 current_topic = stripped.replace("#", "").replace("*", "").strip()
                 continue
-            elif stripped.startswith("## ") and not "comentários" in stripped.lower():
-                current_case_title = stripped.replace("##", "").replace("*", "").strip()
-                continue
-            elif stripped.startswith("## ") and "comentários" in stripped.lower():
+            elif stripped.startswith("## "):
+                if not re.search(r"coment[aá]rios?", stripped, re.IGNORECASE):
+                    current_case_title = stripped.replace("##", "").replace("*", "").strip()
                 continue
 
             # Ignora linha de referência final na formação de parágrafos normais
@@ -86,8 +85,16 @@ class UMTExtractor:
 
         # Se houver parágrafos, processa cada um como candidato a UMT
         for idx, p in enumerate(paragraphs):
-            # Ignora textos puramente institucionais ou curtíssimos
-            if len(p) < 40 or p.lower().startswith("ementa"):
+            # Limpa qualquer resíduo de PII ou sumário
+            p = EditorialFilter.clean_pii(p).strip()
+            p = re.sub(r"(?:\.{3,}|…{2,}|_{3,}|\-{3,})\s*\d+\s*$", "", p).strip()
+
+            # Ignora se for linha de sumário, pontilhado, ou texto curtíssimo sem substância
+            if EditorialFilter.is_toc_line(p) or len(p) < 40 or p.lower().startswith("ementa"):
+                continue
+
+            # Garante que não é apenas números ou pontuação
+            if not re.search(r"[a-zA-ZáéíóúÁÉÍÓÚãõÃÕçÇ]{4,}", p):
                 continue
 
             # Título da UMT
@@ -106,7 +113,7 @@ class UMTExtractor:
                 original_text=p,
                 umt_type=UMTType.JURISPRUDENCIA,
                 complexity=complexity,
-                source_ref=source_ref,
+                source_ref=source_ref or "Jurisprudência / Julgados",
                 highlighted_terms=highlights,
                 tags=[current_topic, title]
             )
@@ -145,7 +152,9 @@ class UMTExtractor:
 
         for m in matches:
             block = m[0].strip() if isinstance(m, tuple) else m.strip()
-            if len(block) < 25:
+            block = EditorialFilter.clean_pii(block).strip()
+            block = re.sub(r"(?:\.{3,}|…{2,}|_{3,}|\-{3,})\s*\d+\s*$", "", block).strip()
+            if EditorialFilter.is_toc_line(block) or len(block) < 25:
                 continue
 
             first_line = block.splitlines()[0]

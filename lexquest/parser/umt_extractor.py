@@ -45,6 +45,27 @@ class UMTExtractor:
         else:
             return self._extract_jurisprudencia_e_doutrina(clean_text, default_topic)
 
+    @staticmethod
+    def is_processual_citation_line(line: str) -> bool:
+        """Verifica se a linha é uma citação de processo/julgado/metadados judiciais."""
+        clean = line.strip().strip("().,")
+        if not clean:
+            return False
+
+        # Prefixos comuns de recursos e classes processuais nos Tribunais Superiores
+        proc_prefixes = r"(?i)^\s*\(?(?:agint|resp|rcl|adi|adpf|adc|ado|re|hc|rms|are|edcl|cc|ms|ai|ro|inq|ap)\b"
+        if re.search(proc_prefixes, clean):
+            return True
+
+        # Menções expressas a relator, julgamento, informativo ou composição de tribunal
+        meta_patterns = [
+            r"(?i)\b(?:relat[oó]r[a]?|rel\.\s*min|relator\s+ministr[oa])\b",
+            r"(?i)\bjulgado\s+em\s+\d{1,2}[\/\.]\d{1,2}[\/\.]\d{2,4}\b",
+            r"(?i)\binfo(?:rmativo)?\s*(?:n[ºo])?\s*\d+\b",
+            r"(?i)\b(?:corte especial|órgão especial|primeira turma|segunda turma|terceira turma|quarta turma|quinta turma|sexta turma|plenário)\b.*?\b(?:julgado|unanimidade|maioria)\b",
+        ]
+        return any(re.search(p, clean) for p in meta_patterns)
+
     def _is_valid_legal_content(self, text: str) -> bool:
         """Valida se o parágrafo possui substância jurídica real e não é ruído ou metadado."""
         if not text or len(text.strip()) < 30:
@@ -63,6 +84,14 @@ class UMTExtractor:
 
         # Rejeita sequências de pontilhados de índice
         if re.search(r"(\.{3,}|…{2,}|_{3,}|\-{3,})", text):
+            return False
+
+        # Rejeita citações processuais puras ou metadados de processo
+        if self.is_processual_citation_line(text):
+            return False
+
+        # Rejeita enunciados ou caputs abertos que terminam em dois pontos sem desdobramento
+        if text.strip().endswith(":"):
             return False
 
         # Deve conter ao menos uma menção a termo normativo, dogmático ou verbo jurídico
@@ -109,26 +138,33 @@ class UMTExtractor:
                     curr_p = []
                 continue
 
-            # Detecta título de ramo do direito (# DIREITO ...)
-            if stripped.startswith("# ") and not stripped.startswith("## "):
-                raw_topic = stripped.replace("#", "").replace("*", "").strip()
-                norm_topic = _strip_accents(raw_topic).upper()
-                if norm_topic in _DIREITO_BRANCHES_NORMALIZED:
-                    current_topic = raw_topic
-                elif not current_case_title:
-                    current_case_title = raw_topic
+            # Detecta se a linha é referência de julgado / metadados processuais
+            if self.is_processual_citation_line(stripped) or (stripped.startswith("(") and ("Informativo" in stripped or "Relator" in stripped or "STF" in stripped or "STJ" in stripped)):
+                source_ref = stripped.strip("()")
+                # Se tínhamos um parágrafo substantivo acumulado antes da citação, fecha-o
+                if curr_p:
+                    paragraphs.append("\n".join(curr_p))
+                    curr_p = []
+                # NUNCA adiciona a linha de citação como parágrafo de conteúdo substantivo!
+                continue
+
+            # Detecta título de ramo do direito (# DIREITO ... ou **DIREITO ...**)
+            clean_head = stripped.replace("#", "").replace("*", "").strip()
+            norm_head = _strip_accents(clean_head).upper()
+            if norm_head in _DIREITO_BRANCHES_NORMALIZED:
+                current_topic = clean_head
+                if curr_p:
+                    paragraphs.append("\n".join(curr_p))
+                    curr_p = []
                 continue
 
             # Detecta título do caso (## Título do Caso / Tema)
-            elif stripped.startswith("## "):
-                # Não substitui caso por "COMENTÁRIOS" ou "RELATÓRIO"
+            elif stripped.startswith("## ") or (stripped.startswith("# ") and norm_head not in _DIREITO_BRANCHES_NORMALIZED):
                 if not re.search(r"coment[aá]rios?|relat[oó]rio|ementa|voto", stripped, re.IGNORECASE):
-                    current_case_title = stripped.replace("##", "").replace("*", "").strip()
-                continue
-
-            # Ignora linha de referência de julgado no corpo (armazena como fonte)
-            if stripped.startswith("(") and ("Informativo" in stripped or "Relator" in stripped or "STF" in stripped or "STJ" in stripped):
-                source_ref = stripped.strip("()")
+                    current_case_title = stripped.replace("##", "").replace("#", "").replace("*", "").strip()
+                    if curr_p:
+                        paragraphs.append("\n".join(curr_p))
+                        curr_p = []
                 continue
 
             curr_p.append(stripped)
@@ -141,8 +177,11 @@ class UMTExtractor:
             p = EditorialFilter.clean_pii(p).strip()
             p = re.sub(r"(?:\.{3,}|…{2,}|_{3,}|\-{3,})\s*\d+\s*$", "", p).strip()
 
-            # Remove marcadores residuais de seção no início (ex: "COMENTÁRIO:", "COMENTÁRIOS:")
+            # Remove marcadores residuais de seção no início (ex: "COMENTÁRIO:", "COMENTÁRIOS:", "RELATÓRIO:")
             p = re.sub(r"(?i)^(?:coment[aá]rios?|relat[oó]rio|ementa|tese)\s*:?\s*", "", p).strip()
+
+            # Remove citações processuais entre parênteses no meio ou final do texto
+            p = re.sub(r"\([^\)]*?(?:relat[oó]r|informativo|stf|stj|julgado em|agint|resp|rcl|adpf|adi)[^\)]*?\)", "", p, flags=re.IGNORECASE).strip()
 
             # Remove citações soltas isoladas no final (ex: "Constituição Federal (redação vigente).")
             citation_end = re.search(r"(?i)\n*(?:Constituição Federal|CF/88|CPC|CP|STF|STJ)\s*\(redação vigente\)\.?\s*$", p)
@@ -154,7 +193,7 @@ class UMTExtractor:
             p = " ".join(p_lines)
             p = re.sub(r"\s+", " ", p).strip()
 
-            # Valida densidade semântica da UMT
+            # Valida densidade semântica da UMT (garante que não é citação, nem cabeçalho aberto)
             if not self._is_valid_legal_content(p):
                 continue
 

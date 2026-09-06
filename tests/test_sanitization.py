@@ -77,3 +77,42 @@ def test_umt_extraction_purity():
         assert "134" not in u.title
         assert "142" not in u.title
         assert len(u.content) >= 40
+
+
+def test_court_metadata_isolation_and_natural_topics():
+    from lexquest.engine.block_manager import BlockManager
+
+    sample_court_clipping = """
+    # EXECUCAO PENAL
+
+    ## Reclamação dirigida contra ato do próprio tribunal
+
+    Não é cabível reclamação contra ato proferido por órgão julgador do próprio Superior Tribunal de Justiça.
+
+    AgInt na Rcl 49.398-DF, Rel. Ministra Maria Thereza de Assis Moura, Corte Especial, por unanimidade, julgado em 11/11/2025 (Info 875-STJ).
+
+    COMENTÁRIO:
+    A reclamação é um instrumento de hierarquia destinado a fazer cumprir decisões de tribunal superior.
+    """
+
+    extractor = UMTExtractor()
+    umts = extractor.extract_from_text(sample_court_clipping)
+
+    # 1. Deve extrair as teses substanciais, e JAMAIS a linha de citação como UMT autônoma
+    assert len(umts) == 2
+    for u in umts:
+        assert "AgInt na Rcl" not in u.content
+        assert "Maria Thereza" not in u.content
+        assert "Info 875-STJ" not in u.content
+
+    # 2. A citação processual deve ter sido capturada como fonte de referência (source_ref)
+    assert any("AgInt na Rcl 49.398-DF" in u.source_ref for u in umts)
+
+    # 3. Na geração de itens, não pode haver 'EXECUCAO PENAL' em caixa alta e nem 'AgInt' nas alternativas
+    bm = BlockManager()
+    cebraspe_questions = bm.generate_cebraspe_battery(umts, total_items=2)
+    for q in cebraspe_questions:
+        assert "EXECUCAO PENAL" not in q.stem
+        assert "Execução Penal" in q.stem
+        assert ".." not in q.stem
+        assert "AgInt na Rcl" not in q.stem

@@ -38,7 +38,7 @@ class ScenarioCatalog:
                 "Em réplica, os proponentes insistiram na caracterização de estado de coisas inconstitucional e na fixação de prazos peremptórios.\n\n"
                 "Submetida a matéria à deliberação definitiva do Plenário da Corte Constitucional,"
             ),
-            prompt="com esteio no entendimento pacificado pelo STF no julgamento da ADPF 973/DF, assinale a afirmativa correta:",
+            prompt="com esteio na jurisprudência vinculante do Supremo Tribunal Federal, assinale a afirmativa correta:",
             keywords=["racismo", "adpf", "estado de coisas", "políticas públicas", "eci", "fundamental"],
             allowed_umt_types=[UMTType.JURISPRUDENCIA, UMTType.DOUTRINA]
         ),
@@ -89,7 +89,7 @@ class ScenarioCatalog:
                 "A sociedade devedora ingressou em juízo alegando a invalidade da cobrança realizada por intermédio de mandatário "
                 "designado pela Pasta da Fazenda, arguindo que a cobrança judicial e extrajudicial de haveres públicos constituiria "
                 "atividade privativa de procuradores concursados, indelegável por ato infraconstitucional.\n\n"
-                "Ao analisar a impugnação deduzida à luz da disciplina legal vigente (Lei nº 11.281/2006),"
+                "Ao analisar a impugnação deduzida à luz da disciplina legal e dos parâmetros normativos aplicáveis,"
             ),
             prompt="o magistrado da causa deverá assentar que:",
             keywords=["exportação", "crédito", "fge", "união", "garantia", "fazenda", "mandatário", "cobrança"],
@@ -105,7 +105,7 @@ class ScenarioCatalog:
                 "medidas de acompanhamento das garantias e de recuperação de haveres sinistrados no exterior.\n\n"
                 "O Tribunal de Contas da União promoveu auditoria de conformidade para averiguar se a União detinha competência "
                 "para transferir tais encargos a mandatário financeiro sem a necessidade de lei complementar específica.\n\n"
-                "Considerando o regime legal positivado pela Lei nº 11.281/2006,"
+                "Considerando o regime legal positivado e a hermenêutica aplicável,"
             ),
             prompt="assinale a opção que expressa o enquadramento jurídico adequado:",
             keywords=["contratar", "instituição", "riscos", "habilitada", "mandatário", "banco do brasil"],

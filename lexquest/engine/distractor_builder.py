@@ -245,6 +245,13 @@ class DistractorBuilder:
         cleaned = re.sub(r"(?i)\b[a-z0-9_]+\.pdf\b", "", cleaned)
         cleaned = re.sub(r"(?i)\b(?:sum[aá]rio|[ií]ndice)\b", "", cleaned)
         cleaned = re.sub(r"(?i)\bdireito\s+[a-zçãõ\s]+\s*\.", "", cleaned)
+
+        # Remove dados de processo, relatoria, datas e turmas (evita enunciados artificiais com metadados)
+        cleaned = re.sub(r"(?i)\(?(?:agint|resp|rcl|adi|adpf|adc|ado|re|hc|rms|are|edcl|cc|ms|ai|ro|inq|ap)\s+(?:no|na|n[ºo]|n°)?\s*[\d\.\-\/]+[^\)]*\)?", "", cleaned)
+        cleaned = re.sub(r"(?i)\b(?:relat[oó]r[a]?|rel\.\s*min|relator\s+ministr[oa])\s+[a-zçãõ\s]+(?=[,\.]|$)", "", cleaned)
+        cleaned = re.sub(r"(?i)\bjulgado\s+em\s+\d{1,2}[\/\.]\d{1,2}[\/\.]\d{2,4}\b", "", cleaned)
+        cleaned = re.sub(r"(?i)\(?(?:info(?:rmativo)?\s*\d+[^\)]*)\)?", "", cleaned)
+        cleaned = re.sub(r"(?i)\b(?:corte especial|plenário|órgão especial|por unanimidade|segunda turma|primeira turma)\b", "", cleaned)
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
         # 3. Pega a primeira sentença substantiva de impacto
@@ -254,10 +261,14 @@ class DistractorBuilder:
         else:
             core = cleaned
 
-        # Trunca para manter entre 15 e 30 palavras
+        # Trunca para manter concisão métrica sem cortar linhas de raciocínio no meio de preposição
         words = core.split()
         if len(words) > 28:
-            core = " ".join(words[:26])
+            words = words[:26]
+            trailing_stopwords = {"de", "da", "do", "das", "dos", "e", "ou", "para", "com", "em", "a", "o", "que", "no", "na", "nos", "nas", "por", "sob", "sobre"}
+            while words and words[-1].lower().rstrip(".,;:") in trailing_stopwords:
+                words.pop()
+            core = " ".join(words)
 
         core = core.rstrip(".,;:")
         if len(core) > 1:

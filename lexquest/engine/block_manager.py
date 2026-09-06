@@ -7,6 +7,7 @@ from .mutator import LexicalMutator
 from .distractor_builder import DistractorBuilder
 from ..scenarios.catalog import ScenarioCatalog
 from ..graph.legal_graph import LegalKnowledgeGraph
+from ..parser.filter import _strip_accents
 
 
 class BlockManager:
@@ -38,6 +39,49 @@ class BlockManager:
         self.distractor_builder = DistractorBuilder(self.mutator)
         self.knowledge_graph = LegalKnowledgeGraph()
         self.scenario_catalog = ScenarioCatalog()
+
+    def _format_topic_natural(self, topic: str) -> str:
+        """Formata o nome da disciplina/tópico de forma elegante e gramaticalmente correta."""
+        if not topic or topic.strip().lower() in ["geral", "amostra", "documento", "documento importado"]:
+            return "ao Direito brasileiro"
+
+        t = topic.strip()
+        norm = _strip_accents(t).upper()
+
+        mapping = {
+            "EXECUCAO PENAL": "Execução Penal",
+            "DIREITO CONSTITUCIONAL": "Direito Constitucional",
+            "DIREITO ADMINISTRATIVO": "Direito Administrativo",
+            "DIREITO PENAL": "Direito Penal",
+            "DIREITO PROCESSUAL PENAL": "Direito Processual Penal",
+            "DIREITO PROCESSUAL CIVIL": "Direito Processual Civil",
+            "DIREITO CIVIL": "Direito Civil",
+            "DIREITO TRIBUTARIO": "Direito Tributário",
+            "DIREITO EMPRESARIAL": "Direito Empresarial",
+            "DIREITO DO TRABALHO": "Direito do Trabalho",
+            "DIREITO PROCESSUAL DO TRABALHO": "Direito Processual do Trabalho",
+            "DIREITO ELEITORAL": "Direito Eleitoral",
+            "DIREITO AMBIENTAL": "Direito Ambiental",
+            "DIREITOS HUMANOS": "Direitos Humanos",
+            "DIREITO FINANCEIRO": "Direito Financeiro",
+            "DIREITO PREVIDENCIARIO": "Direito Previdenciário",
+            "DIREITO DO CONSUMIDOR": "Direito do Consumidor",
+            "DIREITO DA CRIANCA E DO ADOLESCENTE": "Direito da Criança e do Adolescente",
+            "DIREITO INTERNACIONAL": "Direito Internacional",
+        }
+        if norm in mapping:
+            return mapping[norm]
+
+        words = t.split()
+        clean = []
+        lowercase_words = {"de", "da", "do", "das", "dos", "e", "em", "para", "com", "a", "o", "no", "na", "nos", "nas"}
+        for idx, w in enumerate(words):
+            lw = w.lower()
+            if idx > 0 and lw in lowercase_words:
+                clean.append(lw)
+            else:
+                clean.append(w.capitalize())
+        return " ".join(clean)
 
     def generate_fgv_block(
         self,
@@ -99,9 +143,14 @@ class BlockManager:
                 if correct_letter == last_letter:
                     alts, correct_letter = self._rotate_to_avoid_letter(alts, last_letter)
 
+                topic_lbl = self._format_topic_natural(primary_umt.topic)
+                if topic_lbl == "ao Direito brasileiro":
+                    intro = "Com base no ordenamento jurídico pátrio e na jurisprudência dos Tribunais Superiores, analise as afirmativas a seguir:"
+                else:
+                    intro = f"Em relação à matéria de {topic_lbl} e às balizas normativas e jurisprudenciais aplicáveis, analise as afirmativas a seguir:"
+
                 stem = (
-                    f"Em relação ao tema {primary_umt.topic} e às balizas normativas e jurisprudenciais aplicáveis, "
-                    "analise as afirmativas a seguir:\n\n" +
+                    f"{intro}\n\n" +
                     "\n\n".join(propositions) +
                     "\n\nAssinale a opção correta:"
                 )
@@ -169,10 +218,14 @@ class BlockManager:
                 )
 
             else:  # QuestionFormat.CONCEITUAL_DIRETA
-                stem = (
-                    f"No que concerne à matéria afeta a {primary_umt.topic}, com esteio na dogmática jurídica "
-                    f"e nos precedentes dos Tribunais Superiores, assinale a afirmativa correta:"
-                )
+                topic_lbl = self._format_topic_natural(primary_umt.topic)
+                if topic_lbl == "ao Direito brasileiro":
+                    stem = "Com esteio no ordenamento jurídico pátrio e nos precedentes dos Tribunais Superiores, assinale a afirmativa correta:"
+                else:
+                    stem = (
+                        f"No que concerne à disciplina de {topic_lbl}, com esteio na dogmática jurídica "
+                        f"e nos precedentes dos Tribunais Superiores, assinale a afirmativa correta:"
+                    )
 
                 correct_conc = "É juridicamente correto afirmar que"
                 incorrect_conc = "É incorreto sustentar que"
@@ -189,8 +242,8 @@ class BlockManager:
 
                 commentary = (
                     f"QUESTÃO CONCEITUAL / DOGMÁTICA DIRETA.\n"
-                    f"Fundamentação de gabarito: {primary_umt.title} ({primary_umt.source_ref}).\n"
-                    f"Teor original:\n> {primary_umt.original_text}\n"
+                    f"Fundamento jurídico de referência: {primary_umt.title} ({primary_umt.source_ref}).\n"
+                    f"Dispositivo / Tese integral:\n> {primary_umt.original_text}\n"
                 )
 
                 q = Question(
@@ -209,29 +262,25 @@ class BlockManager:
                     total_in_block=5
                 )
 
-            last_letter = correct_letter
             questions.append(q)
+            last_letter = correct_letter
 
         return questions
 
     def generate_cebraspe_battery(
         self,
         umts: List[UMT],
-        total_items: int = 10
+        total_items: int = 5
     ) -> List[Question]:
         """
-        Gera uma bateria de itens no padrão Cebraspe (Certo / Errado).
-        Equilibra 50% CERTO e 50% ERRADO sem sequências longas iguais.
+        Gera bateria de itens no padrão CEBRASPE (Certo/Errado).
+        Distribui veracidade de forma equilibrada sem permitir sequências de 3 itens iguais.
         """
         if not umts:
             return []
 
-        # Gera padrão balanceado de Certo/Errado
-        half = total_items // 2
-        veracities = [True] * half + [False] * (total_items - half)
-        random.shuffle(veracities)
-
-        # Evita mais de 3 consecutivos iguais
+        # Gera padrão de gabarito equilibrado
+        veracities = [True] * (total_items // 2) + [False] * (total_items - total_items // 2)
         veracities = self._shuffle_without_triple_streak(veracities)
 
         questions: List[Question] = []
@@ -242,29 +291,43 @@ class BlockManager:
             umt = umts[umt_idx % total_umts]
             umt_idx += 1
 
-            preambles = [
-                f"A respeito da disciplina de {umt.topic}, julgue o item a seguir.",
-                f"Com base na jurisprudência do Supremo Tribunal Federal e do Superior Tribunal de Justiça relativa a {umt.topic}, julgue o item subsequente.",
-                f"Considerando o ordenamento jurídico pátrio e a hermenêutica das cortes superiores sobre {umt.topic}, julgue o item."
-            ]
+            topic_lbl = self._format_topic_natural(umt.topic)
+            if topic_lbl == "ao Direito brasileiro":
+                preambles = [
+                    "A respeito do ordenamento jurídico pátrio e da jurisprudência dos Tribunais Superiores, julgue o item a seguir.",
+                    "Com base no entendimento jurisprudencial consolidado e nas normas aplicáveis, julgue o item subsequente.",
+                    "Considerando as balizas normativas e a hermenêutica das cortes superiores, julgue o item."
+                ]
+            else:
+                preambles = [
+                    f"A respeito da disciplina de {topic_lbl} e da jurisprudência das Cortes Superiores, julgue o item a seguir.",
+                    f"Com base na jurisprudência do Supremo Tribunal Federal e do Superior Tribunal de Justiça relativa a {topic_lbl}, julgue o item subsequente.",
+                    f"Considerando o ordenamento jurídico pátrio e a hermenêutica das cortes superiores sobre {topic_lbl}, julgue o item."
+                ]
             preamble = random.choice(preambles)
 
+            raw_body = umt.content.strip()
             if is_certo:
-                statement = f"{preamble}\n\n{umt.content.strip()}."
                 correct_val = "CERTO"
                 commentary = (
                     f"ITEM CERTO.\n"
                     f"Espelha com exatidão a literalidade do precedente/diploma: {umt.title} ({umt.source_ref})."
                 )
             else:
-                mut = self.mutator.mutate(umt.content.strip(), desired_complexity=umt.complexity)
-                statement = f"{preamble}\n\n{mut.mutated_text.strip()}."
+                mut = self.mutator.mutate(raw_body, desired_complexity=umt.complexity)
+                raw_body = mut.mutated_text.strip()
                 correct_val = "ERRADO"
                 commentary = (
                     f"ITEM ERRADO.\n"
                     f"{mut.explanation}\n"
                     f"Redação autêntica de referência:\n> {umt.original_text}"
                 )
+            # Normaliza pontuação e garante início com letra maiúscula
+            clean_body = raw_body.rstrip(". \t\n") + "."
+            if len(clean_body) > 1:
+                clean_body = clean_body[0].upper() + clean_body[1:]
+
+            statement = f"{preamble}\n\n{clean_body}"
 
             alts = [
                 Alternative(letter="C", text="( ) CERTO", is_correct=(correct_val == "CERTO"), explanation="Assertiva correta."),

@@ -198,7 +198,39 @@ class EditorialFilter:
                     normalized_paragraphs.append(joined_p)
 
         unified = "\n\n".join(normalized_paragraphs)
-        return unified.strip()
+        # Estágio 6: Reparo de ênclises, mesóclises e hifenizações espúrias de OCR/PDF (padrão LegalNLP)
+        return cls.repair_clitics_and_hyphens(unified).strip()
+
+    @classmethod
+    def repair_clitics_and_hyphens(cls, text: str) -> str:
+        """
+        Repara ênclises, mesóclises e hifens quebrados por colunas de PDFs e OCRs forenses
+        (Inspirado no LegalNLP - Polo et al., 2021).
+        Ex: 'afasta - se' -> 'afasta-se'
+            'caber - lhe - á' -> 'caber-lhe-á'
+            'intime - se' -> 'intime-se'
+            'cons- titucional' -> 'constitucional'
+        """
+        # 1. Repara mesóclises quebradas (ex: aplicar - se - á -> aplicar-se-á)
+        repaired = re.sub(
+            r"\b([a-zA-ZáéíóúÁÉÍÓÚçãõÃÕ]+)\s*-\s*(se|lhe|lhes|nos|vos|me|te|[oa]s?)\s*-\s*([a-zA-ZáéíóúÁÉÍÓÚçãõÃÕ]+)\b",
+            r"\1-\2-\3",
+            text,
+            flags=re.IGNORECASE
+        )
+
+        # 2. Repara ênclises com hífen espaçado (ex: reconhece - se -> reconhece-se)
+        repaired = re.sub(
+            r"\b([a-zA-ZáéíóúÁÉÍÓÚçãõÃÕ]+)\s*-\s*(se|lhe|lhes|nos|vos|me|te|[oa]s?)\b",
+            r"\1-\2",
+            repaired,
+            flags=re.IGNORECASE
+        )
+
+        # 3. Desfaz hifenização artificial no fim de linha (ex: constitu- cional -> constitucional)
+        repaired = re.sub(r"(\w+)-\s+(\w+)", r"\1\2", repaired)
+
+        return repaired
 
 
 # Alias para retrocompatibilidade total

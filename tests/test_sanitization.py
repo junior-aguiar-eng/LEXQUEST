@@ -116,3 +116,37 @@ def test_court_metadata_isolation_and_natural_topics():
         assert "Execução Penal" in q.stem
         assert ".." not in q.stem
         assert "AgInt na Rcl" not in q.stem
+
+
+def test_clitic_repair_and_legal_concepts():
+    from lexquest.parser.filter import EditorialFilter
+    from lexquest.graph.legal_graph import LegalKnowledgeGraph
+    from lexquest.models import UMT, UMTType, Complexity
+
+    # 1. Teste de reparo de ênclises e mesóclises quebradas por OCR/colunas de PDF
+    raw_text = "O princípio aplica - se imediatamente. Determinou - se a prisão e caber - lhe - á recurso. Ordem consti- tucional."
+    repaired = EditorialFilter.repair_clitics_and_hyphens(raw_text)
+    
+    assert "aplica-se" in repaired
+    assert "Determinou-se" in repaired
+    assert "caber-lhe-á" in repaired
+    assert "constitucional" in repaired
+
+    # 2. Teste de reconhecimento de conceitos/bigramas jurídicos enriquecidos
+    kg = LegalKnowledgeGraph()
+    test_umt = UMT(
+        id=99,
+        title="Reclamação e Presunção de Inocência",
+        topic="Direito Processual Civil",
+        content="A reclamação constitucional não serve como sucedâneo recursal quando há trânsito em julgado e respeito à presunção de inocência.",
+        original_text="A reclamação constitucional não serve como sucedâneo recursal quando há trânsito em julgado e respeito à presunção de inocência.",
+        umt_type=UMTType.JURISPRUDENCIA,
+        complexity=Complexity.MEDIO,
+        source_ref="STF"
+    )
+    kg.build_from_umts([test_umt])
+    
+    # Deve conectar aos nós de conceitos jurídicos mapeados
+    nodes = list(kg.graph.nodes)
+    assert any("PRESUNÇÃO_DE_INOCÊNCIA" in n.upper() or "PRESUNCAO_DE_INOCENCIA" in n.upper() for n in nodes)
+    assert any("TRÂNSITO_EM_JULGADO" in n.upper() or "TRANSITO_EM_JULGADO" in n.upper() for n in nodes)

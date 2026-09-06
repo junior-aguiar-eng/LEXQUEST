@@ -21,16 +21,28 @@ class LegalKnowledgeGraph:
     ]
 
     KNOWN_CONCEPTS = [
-        "Racismo Estrutural",
-        "Estado de Coisas Inconstitucional",
-        "Plano Nacional",
-        "Seguro de Crédito à Exportação",
-        "Fundo de Garantia à Exportação",
-        "Cobrança Judicial e Extrajudicial",
-        "Cadeia de Custódia",
-        "Tribunal do Júri",
-        "Nulidade Relativa",
-        "Nulidade Absoluta"
+        # Constitucional e Teoria Geral
+        "Racismo Estrutural", "Estado de Coisas Inconstitucional", "Plano Nacional",
+        "Presunção de Inocência", "Devido Processo Legal", "Ampla Defesa", "Contraditório",
+        "Dignidade da Pessoa Humana", "Separação dos Poderes", "Reserva do Possível",
+        "Mínimo Existencial", "Proporcionalidade", "Razoabilidade", "Segurança Jurídica",
+        "Repercussão Geral", "Ação Direta de Inconstitucionalidade", "Preceito Fundamental",
+        
+        # Penal e Processual Penal
+        "Tribunal do Júri", "Soberania dos Veredictos", "Cadeia de Custódia",
+        "Princípio da Insignificância", "Tipicidade Material", "Excludente de Ilicitude",
+        "Nulidade Relativa", "Nulidade Absoluta", "Crimes Contra a Administração",
+        "Execução Provisória", "Prisão Preventiva",
+
+        # Processo Civil e Jurisprudência dos Tribunais
+        "Trânsito em Julgado", "Coisa Julgada Material", "Interesse de Agir",
+        "Legitimidade Ad Causam", "Tutela Provisória de Urgência", "Sucedâneo Recursal",
+        "Reclamação Constitucional", "Usurpação de Competência", "Prescrição e Decadência",
+
+        # Administrativo e Econômico
+        "Seguro de Crédito à Exportação", "Fundo de Garantia à Exportação",
+        "Cobrança Judicial e Extrajudicial", "Moralidade Administrativa",
+        "Ato Discricionário", "Responsabilidade Civil Objetiva", "Improbidade Administrativa"
     ]
 
     RELATION_PATTERNS = [
@@ -42,6 +54,9 @@ class LegalKnowledgeGraph:
         (r"\bcompetências previstas.*?exercidas por intermédio\b", "COMPETENCIA_DE"),
         (r"\bcobrará judicial e extrajudicialmente.*?por intermédio\b", "EXECUTA_COBRANCA"),
         (r"\bprazo de (\d+)\s+(meses|dias)\b", "FIXA_PRAZO"),
+        (r"\binaplicável aos crimes\b", "INAPLICAVEL"),
+        (r"\butilização como sucedâneo recursal\b", "SUCEDANEO_RECURSAL"),
+        (r"\bnão é cabível reclamação\b", "INCABIVEL"),
     ]
 
     OPPOSITE_RELATIONS = {
@@ -49,6 +64,8 @@ class LegalKnowledgeGraph:
         "AFASTA": "RECONHECE",
         "REJEITA": "ACOLHE",
         "ACOLHE": "REJEITA",
+        "CABIVEL": "INCABIVEL",
+        "INCABIVEL": "CABIVEL",
     }
 
     CONTRASTING_ORGANS = {

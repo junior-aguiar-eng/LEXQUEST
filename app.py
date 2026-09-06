@@ -6,6 +6,7 @@ Aplicação Web Interativa para Resolução e Geração Simbólica de Questões 
 
 import os
 import sys
+import re
 import tempfile
 from pathlib import Path
 import streamlit as st

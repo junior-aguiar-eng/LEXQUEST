@@ -213,8 +213,16 @@ class DistractorBuilder:
         # 1. Remove marcadores markdown e aspas
         cleaned = re.sub(r"[*\"#`]", "", text).strip()
 
-        # 2. Remove prefixos jornalísticos/editoriais
+        # 2. Remove quebras de linha duras dentro da oração
+        cleaned = " ".join(cleaned.splitlines())
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+        # 3. Remove prefixos jornalísticos, editoriais e rótulos de seção
         prefixes = [
+            r"^COMENT[AÁ]RIOS?\s*:?\s*",
+            r"^RELAT[OÓ]RIO\s*:?\s*",
+            r"^EMENTA\s*:?\s*",
+            r"^TESE\s*:?\s*",
             r"^Sete partidos políticos ingressaram.*?com uma ADPF pedindo\s+",
             r"^Isso porque,\s*embora\s+",
             r"^Mesmo sem declarar o ECI,\s*",
@@ -231,6 +239,13 @@ class DistractorBuilder:
         ]
         for p in prefixes:
             cleaned = re.sub(p, "", cleaned, flags=re.IGNORECASE).strip()
+
+        # Remove citações ou referências de arquivo que possam ter sobrado
+        cleaned = re.sub(r"(?i)documento\s+importado\s*:?\s*[^\s\n]+", "", cleaned)
+        cleaned = re.sub(r"(?i)\b[a-z0-9_]+\.pdf\b", "", cleaned)
+        cleaned = re.sub(r"(?i)\b(?:sum[aá]rio|[ií]ndice)\b", "", cleaned)
+        cleaned = re.sub(r"(?i)\bdireito\s+[a-zçãõ\s]+\s*\.", "", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
         # 3. Pega a primeira sentença substantiva de impacto
         sentences = [s.strip() for s in re.split(r"(?<=[.?!])\s+", cleaned) if len(s.strip()) > 15]

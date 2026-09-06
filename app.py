@@ -92,11 +92,15 @@ CUSTOM_CSS = """
 
     /* Enunciado */
     .enunciado-text {
-        font-size: 15px;
-        line-height: 1.6;
+        font-size: 15.5px;
+        line-height: 1.65;
         color: #1e293b;
-        margin: 14px 0 18px 0;
-        white-space: pre-line;
+        margin: 12px 0 16px 0;
+        text-align: justify;
+    }
+    .enunciado-text p {
+        margin: 0 0 10px 0;
+        line-height: 1.65;
     }
 
     /* Caixas de Explicação e Feedback */
@@ -368,11 +372,12 @@ with tab_simulado:
             """
             st.markdown(badge_html, unsafe_allow_html=True)
 
-            # Enunciado
-            st.markdown(f'<div class="enunciado-text">{q.stem}</div>', unsafe_allow_html=True)
+            # Enunciado higienizado
+            clean_stem = re.sub(r"\n{3,}", "\n\n", q.stem.strip())
+            st.markdown(f'<div class="enunciado-text">\n\n{clean_stem}\n\n</div>', unsafe_allow_html=True)
 
-            # Proposições Romanas (se houver)
-            if q.propositions:
+            # Proposições Romanas (se houver e não estiverem já embutidas no enunciado)
+            if q.propositions and not any(p[:30] in clean_stem for p in q.propositions if len(p) >= 30):
                 for prop in q.propositions:
                     st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;**{prop}**")
                 st.write("")

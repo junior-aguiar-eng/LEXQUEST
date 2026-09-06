@@ -17,7 +17,7 @@ class PDFImporter:
     Importador e Minerador de Documentos Jurídicos em PDF (via PyMuPDF / fitz).
     Inspirado na arquitetura do Conversor NexoJuris (junior-aguiar-eng/Conversor-de-PDF-Para-MD-e-Editor).
     Possui filtro ativo contra dados sensíveis (LGPD), marcas d'água de comprador,
-    artefatos de sumários com pontilhados e cabeçalhos de páginas.
+    artefatos de sumários com pontilhados, metadados de arquivos (.pdf) e quebras de linha artificiais.
     """
 
     def __init__(self):
@@ -29,7 +29,7 @@ class PDFImporter:
         output_md_path: Optional[str] = None
     ) -> str:
         """
-        Extrai o texto do PDF estruturando títulos, artigos e eliminando ruídos.
+        Extrai o texto do PDF estruturando títulos, artigos e unindo parágrafos fluidamente.
         """
         if not self.available:
             raise RuntimeError("Biblioteca PyMuPDF não está instalada no ambiente.")
@@ -38,8 +38,7 @@ class PDFImporter:
             raise FileNotFoundError(f"Arquivo PDF não encontrado: {pdf_path}")
 
         doc = fitz.open(pdf_path)
-        md_lines = []
-        md_lines.append(f"# **DOCUMENTO IMPORTADO: {os.path.basename(pdf_path)}**\n")
+        md_blocks: List[str] = []
 
         for page_num in range(len(doc)):
             page = doc[page_num]
@@ -55,8 +54,8 @@ class PDFImporter:
 
                 x0, y0, x1, y1, text = block[0], block[1], block[2], block[3], block[4]
 
-                # 1. Ignora cabeçalhos e rodapés extremos se forem pequenos números de página ou ruído
-                is_header_or_footer = (y0 < page_height * 0.04) or (y1 > page_height * 0.96)
+                # 1. Ignora cabeçalhos e rodapés extremos (números de página, marcas de topo/rodapé)
+                is_header_or_footer = (y0 < page_height * 0.05) or (y1 > page_height * 0.95)
 
                 raw_block_lines = text.splitlines()
                 clean_block_lines = []
@@ -77,12 +76,16 @@ class PDFImporter:
                     if EditorialFilter.is_toc_line(line):
                         continue
 
-                    # 3. Expurgo de Dados Pessoais (CPF, Telefone, Email, Licenciado para...)
+                    # 3. Expurgo de Dados Pessoais (CPF, Telefone, Email, Licenciado para, etc.)
                     cleaned_line = EditorialFilter.clean_pii(line).strip()
                     if not cleaned_line:
                         continue
 
-                    # 4. Detecção e Normalização de Ramos do Direito (ex: DIREITO EMPRESARIAL, EXECUÇÃO PENAL)
+                    # Se for metadado de arquivo temporário ou PDF, descarta
+                    if ".pdf" in cleaned_line.lower() or "documento importado" in cleaned_line.lower():
+                        continue
+
+                    # 4. Detecção e Normalização de Ramos do Direito (ex: DIREITO CONSTITUCIONAL, DIREITO EMPRESARIAL)
                     norm_line = _strip_accents(cleaned_line.replace("**", "").replace("#", "")).upper().strip()
                     if norm_line in _DIREITO_BRANCHES_NORMALIZED:
                         clean_block_lines.append(f"\n# {norm_line}\n")
@@ -93,20 +96,33 @@ class PDFImporter:
                         clean_block_lines.append(f"\n# **{cleaned_line}**\n")
                     elif re.match(r"^Art\.\s*\d+", cleaned_line, re.IGNORECASE):
                         clean_block_lines.append(f"\n**{cleaned_line}**\n")
-                    elif re.match(r"^(COMENTÁRIOS|TESE|EMENTA|RELATÓRIO|VOTO):?$", cleaned_line, re.IGNORECASE):
-                        clean_block_lines.append(f"\n## **{cleaned_line}**\n")
+                    elif re.match(r"^(COMENTÁRIOS|COMENTÁRIO|TESE|EMENTA|RELATÓRIO|VOTO):?$", cleaned_line, re.IGNORECASE):
+                        clean_block_lines.append(f"\n## **{cleaned_line.rstrip(':')}**\n")
                     else:
                         clean_block_lines.append(cleaned_line)
 
                 if clean_block_lines:
-                    # Une linhas do bloco reconstruindo parágrafos coerentes (desfaz quebra por hifenização)
-                    block_text = "\n".join(clean_block_lines)
-                    # Desfaz hifenização no final de linha (ex: "constitu- \n cional" -> "constitucional")
-                    block_text = re.sub(r"(\w+)-\s*\n\s*(\w+)", r"\1\2", block_text)
-                    md_lines.append(f"{block_text}\n")
+                    # Unifica linhas de texto em parágrafos contínuos (remove quebras artificiais de linha de coluna)
+                    reconstructed = []
+                    curr_para = []
+                    for cl in clean_block_lines:
+                        if cl.startswith(("\n#", "\n##", "\n**Art.", "#", "##", "**")):
+                            if curr_para:
+                                reconstructed.append(" ".join(curr_para))
+                                curr_para = []
+                            reconstructed.append(cl.strip())
+                        else:
+                            curr_para.append(cl)
+                    if curr_para:
+                        reconstructed.append(" ".join(curr_para))
 
-        full_md = "\n".join(md_lines)
-        # Aplica o filtro editorial completo para garantir conformidade
+                    block_text = "\n\n".join(reconstructed)
+                    # Desfaz hifenização no final de linha (ex: "constitu- cional" -> "constitucional")
+                    block_text = re.sub(r"(\w+)-\s+(\w+)", r"\1\2", block_text)
+                    md_blocks.append(block_text)
+
+        full_md = "\n\n".join(md_blocks)
+        # Aplica o filtro editorial completo para garantir conformidade total
         sanitized_md = EditorialFilter.clean(full_md)
 
         if output_md_path:
@@ -124,13 +140,13 @@ class PDFImporter:
         page = doc.new_page()
 
         text_content = (
-            "DIREITO PENAL\n"
-            "TEMA 123 - PRINCÍPIO DA INSIGNIFICÂNCIA\n"
-            "O princípio da insignificância é inaplicável aos crimes contra a administração pública.\n"
-            "COMENTÁRIOS\n"
+            "DIREITO PENAL\n\n"
+            "TEMA 123 - PRINCÍPIO DA INSIGNIFICÂNCIA\n\n"
+            "O princípio da insignificância é inaplicável aos crimes contra a administração pública.\n\n"
+            "COMENTÁRIOS\n\n"
             "O Superior Tribunal de Justiça consolidou entendimento por meio da Súmula 599. "
             "A prática de crimes funcionais tutela a moralidade administrativa, "
-            "sendo inviável afastar a tipicidade material pelo reduzido valor patrimonial da lesão.\n"
+            "sendo inviável afastar a tipicidade material pelo reduzido valor patrimonial da lesão.\n\n"
             "Art. 312 O funcionário público que apropriar-se de dinheiro ou valor de que tem a posse em razão do cargo..."
         )
 
@@ -141,7 +157,7 @@ class PDFImporter:
 
 
 def extract_umts_from_pdf(pdf_path: str) -> List[Any]:
-    """Extrai UMTs diretamente de um arquivo PDF sanitizado."""
+    """Extrai UMTs diretamente de um arquivo PDF sanitizado e sem ruídos."""
     importer = PDFImporter()
     md_text = importer.convert_pdf_to_markdown(pdf_path)
     from .umt_extractor import UMTExtractor
